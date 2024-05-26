@@ -1,0 +1,154 @@
+import mysql.connector
+import random
+from mysql.connector import Error
+
+def create_connection(host, username, password, db):
+    connection = None
+    try:
+        connection = mysql.connector.connect(
+            host = host,
+            user = username,
+            passwd = password,
+            database = db
+        )
+        print("Connection Successful!")
+    except Error as e:
+        print(f"The error '{e}' occurred")
+    return connection
+
+
+
+
+seq_cook = [0]*53
+seq_recipe = [0]*144
+seq_origin = [0]*20
+seq_judge = [0]*53
+
+bool_cook = [True]*53
+bool_recipe = [True]*144
+bool_origin = [True]*20
+
+bool_judge = [True]*53
+competition = []
+
+def add_origin_to_episode(episode_dict,element, seq):
+    episode_dict['origins'][seq] = element
+    bool_origin[element - 1] = False
+    seq_origin[element - 1]=+ 1
+
+def add_cook_to_episode(episode_dict,element, seq):
+    episode_dict['cooks'][seq] = element
+    bool_cook[element - 1] = False
+    seq_cook[element - 1]=+ 1
+
+def add_recipe_to_episode(episode_dict,element, seq):
+    episode_dict['recipes'][seq] = element
+    bool_recipe[element - 1] = False
+    seq_recipe[element - 1]=+ 1
+
+def add_judge_to_episode(episode_dict,element, seq):
+    episode_dict['judges'][seq] = element
+    bool_judge[element - 1] = False
+    seq_judge[element - 1]=+ 1
+
+
+def get_random(el_list):
+    return random.choices(el_list)
+
+
+def check_if_unique(element, el_list):
+    return el_list[element - 1]
+
+def check_if_unique_judge(judge):
+    return bool_judge[judge - 1] and bool_cook[judge - 1]
+
+def check_if_consequitive(element, el_list):
+    return True if el_list[element - 1] < 1 else False
+
+def reset_seq(seq_list, selected_list):
+    for i in selected_list:
+        seq_list[i - 1] = 0
+
+def create_episode(num_of_ep,connection,cursor):
+    i = 0
+    episode_dict = {}
+    episode_dict['origins'] = [0]*10
+    episode_dict['cooks'] = [0]*10
+    episode_dict['recipes'] = [0]*10
+    episode_dict['judges'] = [0]*3
+    origin_list = [*range(1,21)]
+    cook_selected_list =[]
+    origin_selected = []
+    recipe_selected = []
+    while (i < 10):
+        origin = get_random(origin_list)[0]
+        origin_list.remove(origin)
+        if(check_if_unique(origin, bool_origin) and check_if_consequitive(origin, seq_origin)):
+            add_origin_to_episode(episode_dict, origin, i)
+            origin_selected.append(origin)
+            cursor.execute("SELECT cook_id FROM cook.cook_to_recipe where origin_id = (%s) group by cook_id", (origin,))
+            connection.commit()
+            cook_list = cursor.fetchall()
+            while True:
+                cook = random.choices(cook_list)[0][0]
+                if(check_if_unique(cook, bool_cook) and check_if_consequitive(cook, seq_cook)):
+                    add_cook_to_episode(episode_dict, cook, i)
+                    cook_selected_list.append(cook)
+                    break
+                else:
+                    cook_list.remove((cook,))
+                    continue
+            cursor.execute("SELECT recipe_id FROM cook.cook_to_recipe where origin_id = (%s) and cook_id = (%s)", (origin,cook))
+            connection.commit()
+            recipe_list = cursor.fetchall()
+            while True:
+                recipe = random.choices(recipe_list)[0][0]
+                if(check_if_unique(recipe, bool_recipe) and check_if_consequitive(recipe, seq_recipe)):
+                    add_recipe_to_episode(episode_dict,recipe, i)
+                    recipe_selected.append(recipe)
+                    break
+                else:
+                    recipe_list.remove((recipe,))
+                    continue
+            cursor.execute("INSERT INTO episode_to_origin (episode_id, origin_id) VALUES (%s, %s)",(num_of_ep,origin))
+            connection.commit()
+            cursor.execute("INSERT INTO episode_to_cook (episode_id, cook_id) VALUES (%s, %s)",(num_of_ep,cook))
+            connection.commit()
+            cursor.execute("INSERT INTO episode_to_recipe (episode_id, recipe_id) VALUES (%s, %s)",(num_of_ep,recipe))
+            connection.commit()
+        i = i + 1
+
+    judge_list = [*range(1,54)]
+    judge_list = [ elem for i,elem in enumerate(judge_list) if elem not in cook_selected_list]
+    judge_selected = []
+    for i in range(3):
+        while True:
+            judge = random.choices(judge_list)[0]
+            if(check_if_unique_judge(judge) and check_if_consequitive(judge, seq_judge)):
+                add_judge_to_episode(episode_dict, judge, i)
+                judge_selected.append(judge)
+                judge_list.remove(judge)
+                break
+            else:
+                judge_list.remove(judge)
+                continue
+    cursor.execute("INSERT INTO episode_to_judge (episode_id, judge1, judge2, judge3) VALUES (%s, %s, %s, %s)",(num_of_ep,judge_selected[0],judge_selected[1],judge_selected[2]))
+    connection.commit()
+    print(episode_dict)
+    reset_seq(seq_origin, origin_selected)            
+    reset_seq(seq_cook, cook_selected_list)
+    reset_seq(seq_recipe, recipe_selected)
+    reset_seq(seq_judge, judge_selected)
+
+def main():
+    connection = create_connection("localhost", "root", "qwer1234", "cook")
+    cursor = connection.cursor(buffered=True)
+##    for i in range (1,11):                        #For some unknown reason this does not return valid data
+##        cursor.clear_attributes()                 #So we have to run this script manually for each episode
+##        create_episode(i,connection,cursor)
+    create_episode(50,connection,cursor)
+
+    
+
+if __name__ == "__main__":
+    main()
